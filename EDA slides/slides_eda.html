@@ -1,22 +1,26 @@
 <!DOCTYPE html>
 <html lang="" xml:lang="">
   <head>
-    <title>Attachment Efficiency Analysis (Mixed Effects Model)</title>
+    <title>Attachment Efficiency Analysis</title>
     <meta charset="utf-8" />
-    <meta name="author" content="Jun" />
-    <script src="libs/header-attrs-2.28/header-attrs.js"></script>
-    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
-    <link href="libs/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+    <meta name="author" content="Jun Chen and Tory Norton" />
+    <meta name="date" content="2026-02-02" />
+    <script src="slides_eda_files/header-attrs-2.28/header-attrs.js"></script>
+    <link href="slides_eda_files/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="slides_eda_files/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
   </head>
   <body>
     <textarea id="source">
 class: center, middle, inverse, title-slide
 
 .title[
-# Attachment Efficiency Analysis (Mixed Effects Model)
+# Attachment Efficiency Analysis
 ]
 .author[
-### Jun
+### Jun Chen and Tory Norton
+]
+.date[
+### 2026-02-02
 ]
 
 ---
@@ -24,12 +28,67 @@ class: center, middle, inverse, title-slide
 
 
 
+
+
+## Background
+
+- Dust particles adhere to solar panels, reducing energy efficiency (*"soiling"*)
+
+- To reduce soiling, we must understand the **adhesive properties** of dust particles
+
+- Dust composition varies by region
+
+- Understanding adhesion for different materials can:
+  - Help identify region-specific challenges
+  - Inform strategies for mitigation
+
+---
+
+## Experimental Design
+
+- **Materials:** alfalfa, fly ash, solosphere, silicon dioxide, graphite, gypsum
+
+- Five glass slides were soiled with each material
+
+- Each slide was imaged at four sites; particles were binned according to size and counted 
+
+- Slides were centrifuged at:
+  - 1000, 3000, 5000, 7000, and 10,000 RPM
+  
+- After each round of centrifuging, slides were re-imaged at the same four sites
+
+---
+
+## Particle count, average diameter, and coverage area
+
+&lt;img src="slides_eda_files/figure-html/unnamed-chunk-1-1.png" width="756" style="display: block; margin: auto;" /&gt;
+
+
+
+---
+
+## Response: Particle coverage area
+
+&lt;img src="slides_eda_files/figure-html/unnamed-chunk-2-1.png" width="756" style="display: block; margin: auto;" /&gt;
+
+
+&lt;!-- &lt;img src="figs/area_by_type.png" width="100%" /&gt; --&gt;
+
+---
+
+## Identifying outliers
+
+&lt;img src="slides_eda_files/figure-html/unnamed-chunk-3-1.png" width="756" style="display: block; margin: auto;" /&gt;
+
+
+
+---
+
+
 ## Frequentist Models - Data Preprocessing
 
-- Outcome Definition:
-
-Outcome: total retained surface area per (type, sample, site, rotation).
-
+&lt;!-- - Outcome Definition: --&gt;
+- **Outcome:** total retained surface area per (type, sample, site, rotation).
 $$
 `\begin{align}
 \mathrm{total\_area}
@@ -37,21 +96,13 @@ $$
 \sum_{\mathrm{bins}}\left(\frac{\pi}{4} d^2\right)\cdot \mathrm{retained}_{\mathrm{bin}} 
 \end{align}`
 $$
-
-
 This aggregates bin-level retention into a single attachment proxy, reflecting the total effective surface area that remains attached after spinning under each rotation speed.
+- **Baseline Handling:** At rotation = 0, retained area equals original deposited area and is treated as baseline
 
-- Baseline Handling (rotation = 0)
-
-At rotation = 0, retained area equals original deposited area and is treated as baseline
-
-- Log transform &amp; zero handling
-
-**Challenges:**  total area includes exact zeros, so log-transform is undefined
-
-**Strategy:** We add small constant c to allow log(total area), which means we use log(total_area + c) when the total area is 0.
-
-**Choice of c:** `\(c=0.1×\)`min(non-zero total area)
+- **Log transform &amp; zero handling:**
+  - **Challenges:**  total area includes exact zeros, so log-transform is undefined
+  - **Strategy:** We add small constant c to allow log(total area), which means we use log(total_area + c) when the total area is 0.
+  - **Choice of c:** `\(c=0.1×\)`min(non-zero total area)
 
 ---
 
@@ -81,6 +132,7 @@ Random effects are nested within particle type and sample–site combinations.
 ## Frequentist Models - Fitting Results
 
 .pull-left[
+&lt;small&gt;
 **Fixed Effect Result:**
 
 | Term              | Estimate | Std. Error | t value |
@@ -88,7 +140,7 @@ Random effects are nested within particle type and sample–site combinations.
 | (Intercept)       | 8.2717   | 0.1231     | 67.17   |
 | scale(rotation)   | -0.7957  | 0.1860     | -4.28   |
 
-**Interpretation:** `\(\beta_1&lt;0\)` implies retained area decreases with rotation. A one–SD increase in rotation is associated with an average ~55% decrease in retained area ($e^{-0.79}$ ~ `\(0.45\)`)
+**Interpretation:** `\(\beta_1&lt;0\)` implies retained area decreases with rotation. A one–SD increase in rotation is associated with an average ~55% decrease in retained area `\((e^{-0.79}\approx 0.45)\)`
 ]
 
 .pull-right[
@@ -137,15 +189,12 @@ Residuals follow the normal reference line well in the central region, with mode
 
 
 
+
+
     </textarea>
 <style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
 <script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
-<script>var slideshow = remark.create({
-"ratio": "16:9",
-"highlightStyle": "github",
-"highlightLines": true,
-"countIncrementalSlides": false
-});
+<script>var slideshow = remark.create();
 if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
   window.dispatchEvent(new Event('resize'));
 });
@@ -223,24 +272,7 @@ if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
       links[i].target = '_blank';
     }
   }
-})();
-// adds .remark-code-has-line-highlighted class to <pre> parent elements
-// of code chunks containing highlighted lines with class .remark-code-line-highlighted
-(function(d) {
-  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
-  const preParents = [];
-  const findPreParent = function(line, p = 0) {
-    if (p > 1) return null; // traverse up no further than grandparent
-    const el = line.parentElement;
-    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
-  };
-
-  for (let line of hlines) {
-    let pre = findPreParent(line);
-    if (pre && !preParents.includes(pre)) preParents.push(pre);
-  }
-  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
-})(document);</script>
+})();</script>
 
 <script>
 slideshow._releaseMath = function(el) {
