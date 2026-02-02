@@ -1,0 +1,304 @@
+---
+title: "Attachment Efficiency Analysis"
+author: "Jun Chen and Tory Norton"
+date: "`r Sys.Date()`"
+output: 
+  # beamer_presentation: 
+  #   theme: default
+  #   colortheme: spruce
+  #   fonttheme: professionalfonts
+    xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      ratio: "16:9"
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+# header-includes:
+#   - \let\oldShaded\Shaded
+#   - \let\endoldShaded\endShaded
+#   - \renewenvironment{Shaded}{\footnotesize\oldShaded}{\endoldShaded}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = F, 
+  message = F, warning = F
+  )
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(coda)
+library(bayesplot)
+library(RColorBrewer)
+
+theme_set(theme_bw())
+options(knitr.kable.NA = '')
+
+load("particleAdhesion.RData")
+adhesion_original <- x
+
+# remove constants and redundant cols
+adhesion_small <- adhesion_original %>%
+  select(-c(bins, removed, hamaker, density, workOfAdhesion))
+
+# move "original" counts to rows with RPM 0
+adhesion <- adhesion_small %>%
+  group_by(site, sample, avgDiameter, type) %>%
+  summarise(retained = unique(original), .groups = "drop") %>%
+  mutate(rotation = 0) %>%
+  rbind(select(adhesion_small, -original))
+
+
+adhesion_area <- adhesion %>%
+  # total diameter/area for each size
+  mutate(diam = avgDiameter * retained,
+         area = (avgDiameter) ^ 2 * pi / 4 * retained) %>%
+  group_by(site, sample, rotation, type) %>%
+  summarise(
+    # sum over sizes
+    total_diam = sum(diam),
+    total_area = sum(area),
+    retained = sum(retained),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # calculate avg diam & total area
+    avg_diam = case_when(retained == 0 ~ 0, TRUE ~ total_diam / retained),
+    id = paste0(sample, site),
+    total_area_cm = total_area/1e+4
+  )
+my_pal <- brewer.pal(8, "Paired")
+```
+
+
+## Background
+
+- Dust particles adhere to solar panels, reducing energy efficiency (*"soiling"*)
+- To reduce soiling, we must understand the **adhesive properties** of dust particles
+- Dust composition varies by region
+- Understanding adhesion for different materials can:
+  - Help identify region-specific challenges
+  - Inform strategies for mitigation
+
+---
+
+## Experimental Design
+
+- **Materials:** alfalfa, fly ash, solosphere, silicon dioxide, graphite, gypsum
+- Five glass slides were soiled with each material
+- Each slide was imaged at four sites; particles were binned according to size and counted 
+- Slides were centrifuged at:
+  - 1000, 3000, 5000, 7000, and 10,000 RPM
+- After each round of centrifuging, slides were re-imaged at the same four sites
+
+---
+
+
+
+## Response: total particle area
+
+```{r, eval = F}
+# crazy high area outlier
+# adhesion %>%
+#   filter(type == "flyash", sample == 3, rotation == 0)
+rpm <- adhesion_area$rotation %>% 
+  unique()
+
+fig_area_by_type <- adhesion_area %>%
+  # remove outlier for plotting
+  filter(type != "flyash" | sample != 3 | rotation != 0 | site != 4) %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6) +
+  geom_jitter() +
+  facet_wrap( ~ type, scales = "free_y") +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) +
+  theme_classic() +
+  labs(
+    # title = "Total particle area measured after each round of centrifuging", 
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm"^2*")"),
+    title = "Total particle area after each round of centrifuging"
+    ) +
+  theme(legend.position = "right") +
+  scale_color_brewer(type = "qual", palette = 3)
+
+#save
+# fig_path <- "/Users/torynorton/shcool/case studies | STA 723/cs2/frequentist slides/figs/"
+fig_path <- "./figs"
+ggsave("area_by_type.png", path = fig_path, width = 9, height = 6)
+```
+
+
+<img src="figs/area_by_type.png" width="100%" />
+
+---
+
+## Identifying outliers
+
+```{r, fig.align='center'}
+adhesion %>%
+  filter(type == "flyash", rotation == 0) %>%
+  uncount(retained) %>% 
+  ggplot(aes(
+    x = avgDiameter,
+    y = as.factor(site),
+    fill = as.factor(sample)
+  )) +
+  geom_boxplot(
+    outliers = T,
+    outlier.size = 1,
+    outlier.color = "grey30",
+    color = "gray30"
+  ) +
+  facet_wrap(
+    ~sample, 
+    scales = "free",
+    labeller = as_labeller(\(x) paste("Sample", x))
+    ) +
+  scale_x_continuous(limits = c(0,45)) +
+  scale_fill_brewer(type = "qual", palette = 3) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(title = "Original distribution of flyash particle size",
+       y = "Site",
+       x = "Diameter")
+  # coord_flip()
+
+```
+
+
+# Modeling
+
+
+## Frequentist Models - Data Preprocessing
+
+- Outcome Definition:
+
+Outcome: total retained surface area per (type, sample, site, rotation).
+
+$$
+\begin{align}
+\mathrm{total\_area}
+=
+\sum_{\mathrm{bins}}\left(\frac{\pi}{4} d^2\right)\cdot \mathrm{retained}_{\mathrm{bin}} 
+\end{align}
+$$
+
+
+This aggregates bin-level retention into a single attachment proxy, reflecting the total effective surface area that remains attached after spinning under each rotation speed.
+
+- Baseline Handling (rotation = 0)
+
+At rotation = 0, retained area equals original deposited area and is treated as baseline
+
+- Log transform & zero handling
+
+**Challenges:**  total area includes exact zeros, so log-transform is undefined
+
+**Strategy:** We add small constant c to allow log(total area), which means we use log(total_area + c) when the total area is 0.
+
+**Choice of c:** $c=0.1×$min(non-zero total area)
+
+---
+
+## Frequentist Models - Model Specification
+
+We fit a mixed-effects model:
+
+$$
+\begin{align}
+\log(\mathrm{total\_area})
+=
+\beta_0 + \beta_1z(\mathrm{rotation}) + b_{1, \mathrm{type}}z(\mathrm{rotation}) + \alpha_{\mathrm{type:sample:site}} + \epsilon
+\end{align}
+$$
+Random effects are nested within particle type and sample–site combinations.
+
+**Components**:
+- Fixed effect $\beta_1$: overall rotation effect
+- Random slope $b_{1, \mathrm{type}}$: particle type-specific sensitivity to rotation
+- Random intercept $\alpha_{\mathrm{type:sample:site}}$: baseline differences within each (type, sample, site). This accounts for repeated measurements within the same experimental unit.
+- Standardize rotation $z(.)$ for numerical fitting stability
+- The original total area are fitted with *rotation = 0*.
+- Size-bin (diameter) effects are implicitly aggregated into total area and not modeled separately at this stage
+
+---
+
+## Frequentist Models - Fitting Results
+
+.pull-left[
+
+<small>
+**Fixed Effect Result:**
+
+| Term              | Estimate | Std. Error | t value |
+|-------------------|----------|------------|---------|
+| (Intercept)       | 8.2717   | 0.1231     | 67.17   |
+| scale(rotation)   | -0.7957  | 0.1860     | -4.28   |
+
+**Interpretation:** $\beta_1<0$ implies retained area decreases with rotation. A one–SD increase in rotation is associated with an average ~55% decrease in retained area ($e^{-0.79}$ ~ $0.45$)
+
+<small>
+]
+
+.pull-right[
+
+<small>
+**Type heterogeneity (Random Slopes):**
+
+| Particle type | b₁,type | β₁ (fixed) | β₁ + b₁,type |
+|---------------|---------|------------|--------------|
+| alfalfa       | -0.3546 | -0.7957    | -1.1503     |
+| flyash        |  0.5988 | -0.7957    | -0.1969     |
+| graphite      |  0.4612 | -0.7957    | -0.3345     |
+| gypsum        |  0.0072 | -0.7957    | -0.7885     |
+| LQ            | -0.4932 | -0.7957    | -1.2889     |
+| SiO2          | -0.5466 | -0.7957    | -1.3423     |
+| solosphere    |  0.3273 | -0.7957    | -0.4684     |
+
+**Interpretation:**  
+More negative values indicate stronger decrease in retained area with increasing rotation. Particle types differ substantially in their sensitivity to rotation, ranging from weak (flyash) to strong (SiO₂, LQ) decreases.
+<small>
+]
+
+---
+
+## Frequentist Models - Model Check
+.pull-left[
+<img src="figs/resid_vs_fitted.png" width="100%" />
+
+Residulas are mostly centered around zero with no strong nonlinear trend, suggesting that hte linear mean structure and variance assumptions are broadly reasonable. But there is a small set of extreme negative residuals corresponds to near-zero total retained area after log-transformation.
+]
+
+.pull-right[
+<img src="figs/qqplot.png" width="100%" />
+
+Residuals follow the normal reference line well in the central region, with moderate deviations in the tails. Given the large sample size, these deviations are unlikely to materially affect inference on fixed effects.
+]
+
+
+---
+## Conclusions:
+
+**What this model captures:** The model accounts for experimental design via random intercepts, and identifies type-to-type variation in rotation response via random slope
+
+**Main Findings:** Rotation is associated with a strong decrease in total retained area. There exists substantial heterogeneity across particle types in this sensitivity
+
+**Limitation:** Size-bin (diameter) information and physical properties are not explicitly modeled. Aggregation to total area may mask size-selective attachment mechanisms operating at the bin level.
+
+**Potential next steps:** Explicitly incorporate particle diameter and measured physical properties (e.g. density, surface characteristics) into our modeling.
+
+
+
+
+

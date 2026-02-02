@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Attachment Efficiency Analysis (Mixed Effects Model)</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Jun" />
+    <script src="libs/header-attrs-2.29/header-attrs.js"></script>
+    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="libs/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+.title[
+# Attachment Efficiency Analysis (Mixed Effects Model)
+]
+.author[
+### Jun
+]
+
+---
+
+
+
+
+## Frequentist Models - Data Preprocessing
+
+- Outcome Definition:
+
+Outcome: total retained surface area per (type, sample, site, rotation).
+
+$$
+`\begin{align}
+\mathrm{total\_area}
+=
+\sum_{\mathrm{bins}}\left(\frac{\pi}{4} d^2\right)\cdot \mathrm{retained}_{\mathrm{bin}} 
+\end{align}`
+$$
+
+
+This aggregates bin-level retention into a single attachment proxy, reflecting the total effective surface area that remains attached after spinning under each rotation speed.
+
+- Baseline Handling (rotation = 0)
+
+At rotation = 0, retained area equals original deposited area and is treated as baseline
+
+- Log transform &amp; zero handling
+
+**Challenges:**  total area includes exact zeros, so log-transform is undefined
+
+**Strategy:** We add small constant c to allow log(total area), which means we use log(total_area + c) when the total area is 0.
+
+**Choice of c:** `\(c=0.1×\)`min(non-zero total area)
+
+---
+
+## Frequentist Models - Model Specification
+
+We fit a mixed-effects model:
+
+$$
+`\begin{align}
+\log(\mathrm{total\_area})
+=
+\beta_0 + \beta_1z(\mathrm{rotation}) + b_{1, \mathrm{type}}z(\mathrm{rotation}) + \alpha_{\mathrm{type:sample:site}} + \epsilon
+\end{align}`
+$$
+Random effects are nested within particle type and sample–site combinations.
+
+**Components**:
+- Fixed effect `\(\beta_1\)`: overall rotation effect
+- Random slope `\(b_{1, \mathrm{type}}\)`: particle type-specific sensitivity to rotation
+- Random intercept `\(\alpha_{\mathrm{type:sample:site}}\)`: baseline differences within each (type, sample, site). This accounts for repeated measurements within the same experimental unit.
+- Standardize rotation `\(z(.)\)` for numerical fitting stability
+- The original total area are fitted with *rotation = 0*.
+- Size-bin (diameter) effects are implicitly aggregated into total area and not modeled separately at this stage
+
+---
+
+## Frequentist Models - Fitting Results
+
+.pull-left[
+**Fixed Effect Result:**
+
+| Term              | Estimate | Std. Error | t value |
+|-------------------|----------|------------|---------|
+| (Intercept)       | 8.2717   | 0.1231     | 67.17   |
+| scale(rotation)   | -0.7957  | 0.1860     | -4.28   |
+
+**Interpretation:** `\(\beta_1&lt;0\)` implies retained area decreases with rotation. A one–SD increase in rotation is associated with an average ~55% decrease in retained area (`\(e^{-0.79}\)` ~ `\(0.45\)`)
+]
+
+.pull-right[
+**Type heterogeneity (random slopes):**
+
+| Particle type | b₁,type | β₁ (fixed) | β₁ + b₁,type |
+|---------------|---------|------------|--------------|
+| alfalfa       | -0.3546 | -0.7957    | -1.1503     |
+| flyash        |  0.5988 | -0.7957    | -0.1969     |
+| graphite      |  0.4612 | -0.7957    | -0.3345     |
+| gypsum        |  0.0072 | -0.7957    | -0.7885     |
+| LQ            | -0.4932 | -0.7957    | -1.2889     |
+| SiO2          | -0.5466 | -0.7957    | -1.3423     |
+| solosphere    |  0.3273 | -0.7957    | -0.4684     |
+
+**Interpretation:**  
+More negative values indicate stronger decrease in retained area with increasing rotation. Particle types differ substantially in their sensitivity to rotation, ranging from weak (flyash) to strong (SiO₂, LQ) decreases.
+]
+
+---
+
+## Frequentist Models - Model Check
+.pull-left[
+&lt;img src="figs/resid_vs_fitted.png" width="100%" /&gt;
+
+Residulas are mostly centered around zero with no strong nonlinear trend, suggesting that hte linear mean structure and variance assumptions are broadly reasonable. But there is a small set of extreme negative residuals corresponds to near-zero total retained area after log-transformation.
+]
+
+.pull-right[
+&lt;img src="figs/qqplot.png" width="100%" /&gt;
+
+Residuals follow the normal reference line well in the central region, with moderate deviations in the tails. Given the large sample size, these deviations are unlikely to materially affect inference on fixed effects.
+]
+
+
+---
+## Conclusions:
+
+**What this model captures:** The model accounts for experimental design via random intercepts, and identifies type-to-type variation in rotation response via random slope
+
+**Main Findings:** Rotation is associated with a strong decrease in total retained area. There exists substantial heterogeneity across particle types in this sensitivity
+
+**Limitation:** Size-bin (diameter) information and physical properties are not explicitly modeled. Aggregation to total area may mask size-selective attachment mechanisms operating at the bin level.
+
+**Potential next steps:** Explicitly incorporate particle diameter and measured physical properties (e.g. density, surface characteristics) into our modeling.
+
+
+
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"ratio": "16:9",
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+// add `data-at-shortcutkeys` attribute to <body> to resolve conflicts with JAWS
+// screen reader (see PR #262)
+(function(d) {
+  let res = {};
+  d.querySelectorAll('.remark-help-content table tr').forEach(tr => {
+    const t = tr.querySelector('td:nth-child(2)').innerText;
+    tr.querySelectorAll('td:first-child .key').forEach(key => {
+      const k = key.innerText;
+      if (/^[a-z]$/.test(k)) res[k] = t;  // must be a single letter (key)
+    });
+  });
+  d.body.setAttribute('data-at-shortcutkeys', JSON.stringify(res));
+})(document);
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

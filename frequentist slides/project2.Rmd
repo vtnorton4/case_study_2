@@ -1,0 +1,154 @@
+---
+title: "Project2"
+author: "Jun"
+date: "2026-01-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data = load("particleAdhesion.RData")
+df = get(data)
+print(df)
+```
+
+```{r}
+df %>%
+  summarise(
+    n_total = n(),
+    n_original_0 = sum(original == 0, na.rm = TRUE),
+    prop_original_0 = mean(original == 0, na.rm = TRUE)
+  )
+
+df %>% filter(original == 0) %>% summarise(
+    n_total = n(),
+    n_retained_0 = sum(retained > 0, na.rm = TRUE),
+    prop_retained_0 = mean(retained > 0, na.rm = TRUE)
+)
+```
+
+```{r}
+df %>%
+  group_by(site, sample, avgDiameter, type) %>%
+  summarise(
+    n_unique_original = n_distinct(original),
+    n_rotation = n_distinct(rotation)
+  ) 
+
+
+```
+
+# Model 1
+
+```{r}
+
+adhesion_original <- x
+
+# remove constants and redundant cols
+adhesion_small <- adhesion_original %>%
+  select(-c(bins, removed, hamaker, density, workOfAdhesion))
+
+# move "original" counts to rows with RPM 0
+adhesion_small_copy = adhesion_small %>% select(-original)
+adhesion_small_original= adhesion_small %>%
+  group_by(site, sample, avgDiameter, type) %>%
+  summarise(retained = unique(original), .groups = "drop") %>%
+  mutate(rotation = 0)
+
+adhesion = rbind(adhesion_small_copy, adhesion_small_original)
+
+adhesion_area <- adhesion %>%
+  mutate(
+    diam = avgDiameter * retained, # total diameter for each size
+    area = (avgDiameter)^2 * pi/4 * retained # area
+    ) %>%
+  group_by(site, sample, rotation, type) %>%
+  summarise(
+    total_diam = sum(diam),  # sum over sizes
+    total_area = sum(area),
+    retained = sum(retained),
+    .groups = "drop"
+  ) %>%
+  mutate(   # calculate avg diam & total area
+    avg_diam = case_when(retained == 0 ~ 0, TRUE ~ total_diam / retained),
+    id = paste0(sample, site)
+  )
+
+
+
+
+```
+
+```{r}
+print(adhesion_area)
+
+```
+
+```{r}
+library(lme4)
+
+adhesion_clean = adhesion_area %>% filter(!(rotation == 0 & total_area == 0))
+c0 <- 0.1 * min(adhesion_clean$total_area[adhesion_clean$total_area > 0])
+print(c0)
+adhesion_clean <- adhesion_clean %>%
+  mutate(
+    total_area_adj = if_else(
+      total_area == 0,
+      c0,
+      total_area
+    ),
+    log_total_area = log(total_area_adj)
+  )
+
+fit_lmer =  lmer(
+  log_total_area ~ scale(rotation) +
+    (1 | id:type) +          
+    (0 + scale(rotation) | type), 
+  data = adhesion_clean,
+  REML = TRUE
+)
+
+summary(fit_lmer)
+ranef(fit_lmer)$type
+```
+
+```{r, echo=FALSE}
+library(dplyr)
+library(knitr)
+
+fixef_mat <- summary(fit_lmer)$coefficients
+fixef_df <- as.data.frame(fixef_mat) %>%
+  tibble::rownames_to_column("term") %>%
+  transmute(
+    term = term,
+    estimate = Estimate,
+    std_error = `Std. Error`,
+    t_value = `t value`
+  )
+
+fixef_df %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
+  kable(caption = "Fixed effects estimates (β0, β1). rotation is standardized by scale(rotation).")
+
+fixef_df
+```
+
+```{r}
+
+adhesion_clean$fitted <- fitted(fit_lmer)
+adhesion_clean$resid <- resid(fit_lmer)
+
+ggplot(adhesion_clean, aes(fitted, resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed")
+
+qqnorm(resid(fit_lmer))
+qqline(resid(fit_lmer))
+```
+
+# Model 2
+
+
