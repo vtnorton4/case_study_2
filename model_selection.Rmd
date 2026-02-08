@@ -1,0 +1,618 @@
+---
+title: "EDA"
+author: "Tory Norton"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(patchwork)
+library(RColorBrewer)
+#load data
+load("particleAdhesion.RData")
+adhesion_original <- x
+theme_set(theme_classic())
+```
+
+
+# data wrangling
+
+```{r}
+# remove constants and redundant cols
+adhesion_small <- adhesion_original %>%
+  select(-c(bins, removed, hamaker, density, workOfAdhesion))
+
+# move "original" counts to rows with RPM 0
+adhesion <- adhesion_small %>%
+  group_by(site, sample, avgDiameter, type) %>%
+  summarise(retained = unique(original), .groups = "drop") %>%
+  mutate(rotation = 0) %>%
+  rbind(select(adhesion_small, -original))
+
+# calculate area for each sample/site
+adhesion_area <- adhesion %>%
+  # total diameter/area for each size
+  mutate(diam = avgDiameter * retained,
+         area = (avgDiameter) ^ 2 * pi / 4 * retained) %>%
+  group_by(site, sample, rotation, type) %>%
+  summarise(
+    # sum over sizes
+    total_diam = sum(diam),
+    total_area = sum(area),
+    retained = sum(retained),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # calculate avg diam & total area
+    avg_diam = case_when(retained == 0 ~ 0, TRUE ~ total_diam / retained),
+    avg_area = case_when(retained == 0 ~ 0, TRUE ~ total_area / retained),
+    unique_id = paste0(type, sample, site),
+    total_area_cm = total_area/1e+4,
+    avg_area_cm = avg_area/1e+4
+  )
+```
+
+
+## choosing response variable
+
+
+```{r}
+value_labeller <- c(
+  "avg_diam" = "'Avg. diameter ('*mu*'m)'",
+  "retained" = "'Count'",
+  "total_area_cm" = "'Total area (cm'^2*')'"
+)
+particle_types <- adhesion_area$type %>% unique()
+
+plot_count_diam_area <- function(ptype, legend = F) {
+  value_labeller <- c(
+    "avg_diam" = "'Avg. diameter ('*mu*'m)'",
+    "retained" = "'Count'",
+    "total_area_cm" = "'Total area (cm'^2*')'"
+  )
+  particle_types <- adhesion_area$type %>% unique()
+  if (!ptype %in% particle_types) {stop("Invalid type")}
+  p <- adhesion_area %>%
+    filter(type == ptype) %>%
+    mutate(avg_diam = case_match(avg_diam, 0 ~ NA, .default = avg_diam)) %>%
+    pivot_longer(cols = c("retained", "avg_diam", "total_area_cm")) %>%
+    mutate(name = fct_relevel(name, "retained")) %>%
+    ggplot(aes(
+      x = rotation,
+      y = value,
+      color = as.factor(sample)
+    )) +
+    geom_smooth(se = F, linewidth = 0.7) +
+    geom_jitter() +
+    facet_wrap(
+      ~ name,
+      labeller = as_labeller(value_labeller, default = label_parsed),
+      ncol = 1,
+      scales = "free_y"
+    ) +
+    scale_color_brewer(type = "qual", palette = 3) +
+    labs(title = ptype, color = "Sample", # y = "",
+         x = "RPM") +
+    theme_classic() +
+    theme(
+      panel.grid.major = element_line(),
+      axis.title.y = element_blank()
+    )
+  if (!legend) {
+    p <- p +
+      theme(legend.position = "none")
+  }
+  return(p)
+}
+
+p1 <- plot_count_diam_area("alfalfa")
+p2 <- plot_count_diam_area("gypsum", legend = T)
+
+(p1 | p2)
+```
+
+
+
+```{r, message=FALSE, warning = F}
+rpm <- adhesion_area$rotation %>% 
+  unique()
+
+fig_area_by_type <- adhesion_area %>%
+  # remove outlier for plotting
+  filter(type != "flyash" | sample != 3 | rotation != 0 | site != 4) %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6) +
+  geom_jitter() +
+  facet_wrap( ~ type, scales = "free_y") +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm"^2*")"),
+    title = "Particle coverage area after each round of centrifuging"
+    ) +
+  theme(legend.position = "right") +
+  scale_color_brewer(type = "qual", palette = 3)
+fig_area_by_type
+```
+
+
+
+
+
+
+
+# cleaning: identifying outliers
+
+## High outlier in flyash
+
+```{r}
+# crazy outlier
+outlier_data <- adhesion_area %>%
+  filter(type == "flyash" & sample == 3 & rotation == 0 & site == 4)
+
+adhesion_area %>%
+  # remove outlier for plotting
+  filter(type != "flyash" | sample != 3 | rotation != 0 | site != 4) %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6) +
+  geom_jitter() +
+  facet_wrap(~ type) +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "Particle coverage area after each round of centrifuging"
+  ) +
+  theme(legend.position = "right") +
+  scale_color_brewer(type = "qual", palette = 3) +
+  geom_point(data = outlier_data) +
+  geom_point(data = outlier_data, shape = 1, color = "red", size = 4) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.2)))
+
+```
+
+
+```{r}
+p_graphite <- adhesion_area %>%
+  # remove outlier for plotting
+  filter(type == "graphite") %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample),
+    group = unique_id
+  )) +
+  geom_line() +
+  geom_jitter() +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "graphite"
+  ) +
+  scale_color_brewer(type = "qual", palette = 3) 
+
+p_graphite1 <- adhesion_area %>%
+  filter(type == "graphite" & sample == 1) %>% 
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample),
+    group = unique_id
+  )) +
+  facet_wrap(~site)+
+  geom_line() +
+  geom_jitter() +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "Sample 1 by site"
+  ) +
+  scale_color_brewer(type = "qual", palette = 3) 
+  
+p_graphite 
+p_graphite1
+
+adhesion %>%
+  filter(type == "graphite" & sample == 1 & rotation %in% c(0, 10000)) %>%
+  uncount(retained, .remove = F) %>% 
+  ggplot(aes(
+    x = avgDiameter,
+    fill = as.factor(rotation),
+    color = as.factor(rotation)
+    # alpha = as.factor(rotation)
+  )) +
+  geom_histogram(
+    position = "identity", 
+    # color = "gray15", 
+    linewidth = 0.2,
+    binwidth = 0.3
+    ) +
+  facet_wrap(
+    ~site, 
+    scales = "fixed",
+    labeller = as_labeller(\(x) paste("Site", x))
+    ) +
+  scale_fill_manual(
+    values = c(alpha("steelblue3", 0.7), alpha("firebrick", 0.5)),
+    aesthetics = c("fill", "color"),
+    labels = c("Original", "10000rpm")
+    ) +
+  scale_x_continuous(transform = "sqrt") +
+  labs(title = "graphite sample 1",
+       # y = "Site",
+       x = expression(sqrt("diameter"))) +
+  theme(legend.title = element_blank(),
+        legend.position = c(1,1),
+        legend.justification = c(1,1),
+        legend.key.size = unit(0.03, "snpc"),
+        legend.key.spacing.y = unit(0.01, "npc"),
+        )
+
+# adhesion_original %>%
+#   filter(type == "graphite" & sample == 1 & rotation == 10000 & site == 3) %>% 
+#   ggplot(aes(x = avgDiameter, y = removed)) +
+#   geom_hline(yintercept = 0) +
+#   geom_point()
+
+
+adhesion_area %>%
+  filter(type == "LQ") %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample),
+    group = unique_id
+  )) +
+  geom_line() +
+  geom_jitter() +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "LQ"
+  ) +
+  scale_color_brewer(type = "qual", palette = 3) 
+
+adhesion_original %>%
+  filter(type == "LQ" & sample == 5 & site == 1 & rotation == 1000) %>% 
+  pivot_longer(c(retained, original)) %>% 
+  ggplot(aes(x = avgDiameter, y = value, fill = name)) +
+  # geom_hline(yintercept = 0) +
+  geom_col(position = "dodge") +
+  # geom_point() +
+  theme_bw() +
+  scale_x_continuous(limits = c(0,50)) +
+  labs(title = "LQ sample 5 site 1")
+```
+
+
+- graphite sample 1, site 3 has unusual area values for 0 and 10000rpm
+  - when we look at counts for each particle size, nearly all of them are larger after 10000rpm compared to original counts
+  - doesn't make sense -- counts appear to have been measured or entered incorrectly
+  - we will remove these measurements
+
+- removing "original" measurement for LQ sample 5 site 1 -- does not make sense for count of largest particle size to increase drastically after spinning at 1000rpm
+
+
+```{r}
+outlier_ids <- tribble(
+  ~unique_id, ~rotation,
+  "flyash34", 0,
+  "LQ51", 0,
+  "graphite13", 0,
+  "graphite13", 10000
+)
+
+adhesion_outliers <- adhesion_area %>%
+  semi_join(outlier_ids)
+adhesion_clean <- adhesion_area %>%
+  anti_join(outlier_ids)
+
+adhesion_clean %>%
+  filter(type %in% adhesion_outliers$type) %>% 
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6) +
+  geom_jitter() +
+  facet_wrap(~ type, scales = "free") +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "Particle coverage area after each round of centrifuging"
+  ) +
+  theme(legend.position = "right") +
+  scale_color_brewer(type = "qual", palette = 3) +
+  geom_point(data = adhesion_outliers) +
+  geom_point(data = adhesion_outliers, shape = 1, color = "red", size = 6, stroke = 1)
+  # scale_y_continuous(transform = "log")
+```
+Four outliers removed
+
+
+# LME Model
+
+```{r}
+adhesion_clean <- adhesion_clean %>% 
+  mutate(area_cm = total_area_cm,
+         area_cm_log = log1p(area_cm),
+         area_cm_sqrt = sqrt(area_cm))
+
+adhesion_clean %>% 
+  filter(!type %in% c("flyash", "SiO2", "graphite")) %>% 
+  pivot_longer(
+    starts_with("area"),
+    names_to = "transform"
+    ) %>% 
+  ggplot(aes(
+    x = rotation,
+    y = value,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.5) +
+  geom_jitter(alpha = 0.5) +
+  # facet_wrap( ~ type, scales = "fixed") +
+  facet_grid(rows = vars(transform), cols = vars(type), scales = "free_y") +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) +
+  scale_color_brewer(type = "qual", palette = 3) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+- considered root and log-transform for area
+- goal: "linearity in RPM"
+  - both transforms help a bit for 0 - 1000rpm, but make the graphs look more nonlinear when counts drop to 0
+
+## physical constants
+
+```{r}
+adhesion_constants <- adhesion_original %>% 
+  group_by(type) %>% 
+  summarise(
+    density = unique(density),
+    hamaker = unique(hamaker),
+    workOfAdhesion = unique(workOfAdhesion)
+    )
+
+adhesion_constants %>% 
+  ggplot(aes(x=hamaker, y = workOfAdhesion, color = density)) + 
+  geom_point()
+
+adhesion_clean <- adhesion_clean %>% 
+  left_join(adhesion_constants)
+```
+
+- hamaker and WOA are completely correlated, so we consider only density and WOA
+
+
+```{r}
+adhesion_clean %>% 
+  filter(rotation == 0) %>% 
+  ggplot(aes(y = total_area_cm, x = density, color = type, group = 1)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = F) +
+  labs(title = "Density")
+
+adhesion_clean %>% 
+  filter(rotation == 0) %>% 
+  ggplot(aes(y = total_area_cm, x = workOfAdhesion, color = type, group = 1)) +
+  geom_jitter() +
+  geom_smooth(method = "lm", se = F) +
+  labs(title = "workOfAdhesion")
+  
+```
+
+Little evidence that density has a linear effect on intercept (area at 0 rpm), but some evidence for workOfAdhesion
+
+
+```{r}
+adhesion_clean %>% 
+  # filter(!type %in% c("gypsum", "solosphere")) %>%
+  pivot_wider(
+    id_cols = c(unique_id, site, sample, type), 
+    names_from = rotation, 
+    values_from = total_area_cm,
+    names_prefix = "rpm_") %>% 
+  left_join(adhesion_constants) %>% 
+  mutate(area_rm_1000 = rpm_0 - rpm_1000) %>% 
+  pivot_longer(cols = c(density, workOfAdhesion)) %>% 
+  ggplot(aes(x = value, y = area_rm_1000, color = type, group = name)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  facet_wrap(~name, scales = "free_x") +
+  labs(title = "all types")
+
+adhesion_clean %>% 
+  filter(!type %in% c("gypsum")) %>%
+  pivot_wider(
+    id_cols = c(unique_id, site, sample, type), 
+    names_from = rotation, 
+    values_from = total_area_cm,
+    names_prefix = "rpm_") %>% 
+  left_join(adhesion_constants) %>% 
+  mutate(area_rm_1000 = rpm_0 - rpm_1000) %>% 
+  pivot_longer(cols = c(density, workOfAdhesion)) %>% 
+  ggplot(aes(x = value, y = area_rm_1000, color = type, group = name)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = F) +
+  facet_wrap(~name, scales = "free_x") +
+  labs(title = "without gypsum")
+
+adhesion_clean %>% 
+  filter(!type %in% c("gypsum", "solosphere")) %>%
+  pivot_wider(
+    id_cols = c(unique_id, site, sample, type), 
+    names_from = rotation, 
+    values_from = total_area_cm,
+    names_prefix = "rpm_") %>% 
+  left_join(adhesion_constants) %>% 
+  mutate(area_rm_1000 = rpm_0 - rpm_1000) %>% 
+  pivot_longer(cols = c(density, workOfAdhesion)) %>% 
+  ggplot(aes(x = value, y = area_rm_1000, color = type, group = name)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  facet_wrap(~name, scales = "free_x") +
+  labs(title = "without gypsum and solosphere")
+```
+
+- some evidence that both density and workOfAdhesion affect the change in area after centrifuging
+- gypsum and solosphere have unusually high values and high variance
+- however, the linear effect of WOA appears much weaker when gypsum is removed, and changes direction when gypsum and solosphere are removed
+  - linear effect of density is always positive
+
+# Model
+
+
+```{r}
+library(lme4)
+diam_rpm0 <- filter(adhesion_area, rotation == 0) %>% 
+  group_by(type) %>% 
+  summarise(total_diam = sum(total_diam), retained = sum(retained), avg_diam0 = total_diam/retained)
+
+adhesion_clean <- adhesion_clean %>% 
+  mutate(density_scaled = scale(density), 
+         woa_scaled = scale(workOfAdhesion),
+         samp_id = paste0(type,sample)
+         ) %>% 
+  left_join(select(diam_rpm0, type, avg_diam0))
+
+mod_lm <- lm(
+  total_area_cm ~ woa_scaled + density_scaled*rotation + rotation,
+  data = adhesion_clean
+  )
+
+
+mod_type_int <- lmer(
+  total_area_cm ~ (1|type) + woa_scaled + rotation + density_scaled*rotation,
+  data = adhesion_clean
+  )
+
+mod_type_slope0 <- lmer(
+  total_area_cm ~ (1 + rotation|type) + woa_scaled + rotation +  density_scaled*rotation,
+  data = adhesion_clean
+  )
+mod_type_slope1 <- lmer(
+  total_area_cm ~ (1 + rotation|type) + woa_scaled + rotation + avg_diam0*rotation +  density_scaled*rotation,
+  data = adhesion_clean
+  )
+
+mod_site_int <- lmer(
+  total_area_cm ~ (1|unique_id) + woa_scaled + rotation + density_scaled*rotation,
+  data = adhesion_clean
+  )
+
+mod_samp_slope <- lmer(
+  total_area_cm ~ (1|samp_id) + (rotation|type) + woa_scaled + rotation + density_scaled*rotation,
+  data = adhesion_clean
+  )
+
+mod_site_slope <- lmer(
+  total_area_cm ~ (1|unique_id) + (rotation|type) + woa_scaled + rotation + density_scaled*rotation,
+  data = adhesion_clean
+  )
+
+mod_list <- list(
+  mod_lm,
+  mod_type_int,
+  mod_type_slope0,
+  mod_type_slope1,
+  mod_site_int,
+  mod_samp_slope,
+  mod_site_slope
+)
+
+tibble(
+  model = c("mod_lm", "mod_type_int", "mod_type_slope0", "mod_type_slope1", "mod_site_int", "mod_samp_slope", "mod_site_slope"),
+  AIC = sapply(mod_list, AIC),
+  BIC = sapply(mod_list, BIC)
+)
+
+plot(mod_site_slope)
+
+re_df_site <- broom.mixed::tidy(mod_site_slope, effects = "ran_vals")
+
+library(lattice)
+dotplot(ranef(mod_site_slope, condVar = TRUE),
+        strip = FALSE)
+
+ggplot(re_df_site, aes(x = estimate, y = level)) +
+  geom_point() +
+  facet_wrap(~ term, scales = "free") +
+  labs(x = "Random effect estimate",
+       y = "Group level") +
+  theme_bw()
+
+re_df_type <- broom.mixed::tidy(mod_type_slope, effects = "ran_vals")
+
+ggplot(re_df_type, aes(x = estimate, y = level)) +
+  geom_point() +
+  facet_wrap(~ term, scales = "free") +
+  labs(x = "Random effect estimate",
+       y = "Group level") +
+  theme_bw()
+
+coef(mod_type_int)
+coef(mod_type_slope)
+```
+
+```{r}
+mod_site_slope <- lmer(
+  total_area_cm ~ (1|unique_id) + (rotation|type) + woa_scaled + rotation + density_scaled*rotation,
+  data = adhesion_clean
+  )
+```
+
+
+All predictors/response scaled 
+
+$p$ - particle type
+$i$ - sample
+$j$ - rotation
+
+$$
+\begin{aligned}
+y_{pij} &= \beta_0+ \beta_1\text{WOA}_p + \beta_2\text{rpm}_j + \beta_3(\text{rpm}_j\times \text{density}_p) + \mu_{i} + \gamma_i \text{rpm}_j + \epsilon_j \\
+\beta_k &\sim N(0, \sigma_\beta^2) \\
+\mu_i &\sim N(0, \sigma_\mu^2) \\
+\gamma_i &\sim N(0, \sigma_\gamma^2) \\
+\sigma_\ell &\sim \text{half-t}(0, 0.01) \qquad \ell \in \{\beta, \mu,\gamma\}\\
+\epsilon_j &\sim N(0, \sigma^2) \\
+\sigma &\sim \text{half-t}(0, 0.01)
+\end{aligned}
+$$
+
+
+
