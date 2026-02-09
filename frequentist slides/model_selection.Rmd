@@ -987,4 +987,116 @@ samples_2 = coda.samples(
 rl_main_2 <- raftery.diag(samples_2[, params_beta], q = 0.025, r = 0.005, s = 0.95)
 rl_main_2
 ```
+```{r}
+# trace plots
+params_main = c("beta_0", "beta_1", "beta_2", "beta_3", "gamma[1]", "gamma[2]", "gamma[3]", "gamma[4]", "gamma[5]", "gamma[6]", "gamma[7]") 
+plot(samples_2[,params_main])
 
+# Gelman-Rubin number 
+gel <- gelman.diag(samples_2[,params_main], autoburnin = FALSE)
+gel 
+
+# Gelman-Rubin plot
+gelman.plot(samples_2[,params_main],las=1,transform=TRUE,ask=FALSE)
+
+# ESS 
+effectiveSize(samples_2[,params_main])
+
+# goodness of fit - posterior probability check (PPC)
+summary(samples_2[, "pval_mean"]) # mean PPC
+
+# mean structure: posterior predictive probability ～ 0.39, about %39 replicated data has larger mean than the observed data, no systematic discrepency
+# Posterior predictive checks based on the mean of the outcome indicate no systematic discrepancy between observed and replicated data (Bayesian p-value ≈ 0.39)
+
+summary(samples_2[,"pval_rss"]) # rss PPC
+
+
+```
+
+```{r}
+
+ m_3 <- as.matrix(samples_2) 
+```
+
+```{r}
+# m <- as.matrix(samples) 
+
+# sum up the beta_2 and gamma
+gamma_names_2 <- grep("^gamma\\[", colnames(m), value = TRUE)
+gamma_mat_2 <- m_3[, gamma_names_2, drop = FALSE]
+b2_2 <- m_3[, "beta_2"]
+slope_mat_2 <- sweep(gamma_mat_2, 1, b2_2, FUN = "+")
+colnames(slope_mat_2) <- sub("^gamma\\[", "slope_type[", colnames(slope_mat_2))
+m2_2 <- cbind(m_3, slope_mat_2)
+
+type_fac <- factor(adhesion_clean$type)   
+type_levels <- levels(type_fac)
+mapping <- data.frame(
+  type_index = seq_along(type_levels),
+  type_name = type_levels
+)
+
+mapping
+
+res_2 <- rbind( summ_beta(m2_2, "beta_0"), 
+              summ_beta(m2_2, "beta_1"), 
+              summ_beta(m2_2, "beta_2"),
+              summ_beta(m2_2, "beta_3"),
+              summ_beta(m2_2, "slope_type[1]"),
+              summ_beta(m2_2, "slope_type[2]"),
+              summ_beta(m2_2, "slope_type[3]"),
+              summ_beta(m2_2, "slope_type[4]"),
+              summ_beta(m2_2, "slope_type[5]"),
+              summ_beta(m2_2, "slope_type[6]"),
+              summ_beta(m2_2, "slope_type[7]"))
+
+res_2$param[res_2$param == "beta_0"] <- "Intercept"
+res_2$param[res_2$param == "beta_1"] <- "WOA effect"
+res_2$param[res_2$param == "beta_2"] <- "Mean rotation effect"
+res_2$param[res_2$param == "beta_3"] <- "Rotation × density"
+res_2$param[res_2$param == "slope_type[1]"] <- "Rotation effect for alfalfa"
+res_2$param[res_2$param == "slope_type[2]"] <- "Rotation effect for flyash"
+res_2$param[res_2$param == "slope_type[3]"] <- "Rotation effect for graphite"
+res_2$param[res_2$param == "slope_type[4]"] <- "Rotation effect for gypsum"
+res_2$param[res_2$param == "slope_type[5]"] <- "Rotation effect for LQ"
+res_2$param[res_2$param == "slope_type[6]"] <- "Rotation effect for SiO2"
+res_2$param[res_2$param == "slope_type[7]"] <- "Rotation effect for solosphere"
+print(res_2)
+
+```
+
+
+```{r}
+slopes_df_2 <- res_2 %>%
+  filter(str_detect(param, "^Rotation effect for ")) %>%
+  mutate(type = str_remove(param, "^Rotation effect for ")) %>%
+  arrange(mean) %>%                            
+  mutate(type = factor(type, levels = type))    
+
+ggplot(slopes_df_2, aes(x = type, y = mean)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point() +
+  geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0.15) +
+  coord_flip() +
+  labs(
+    x = "Particle type",
+    y = "Rotation slope (posterior mean ± 95% CrI)",
+    title = "Type-specific rotation effects"
+  )
+
+beta2_2 <- res_2 %>% filter(param == "Mean rotation effect") %>% pull(mean)  
+
+ggplot(slopes_df_2, aes(x = type, y = mean)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = beta2_2, linetype = "dotted") +
+  geom_point() +
+  geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0.15) +
+  coord_flip() +
+  labs(
+    x = "Particle type",
+    y = "Rotation slope (posterior mean ± 95% CrI)",
+    title = "Type-specific rotation effects at the average density level",
+    subtitle = "Dashed: 0, Dotted: overall mean rotation effect (beta_2)"
+  )
+
+```
