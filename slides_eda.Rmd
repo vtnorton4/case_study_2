@@ -1,0 +1,501 @@
+---
+title: "Attachment Efficiency Analysis"
+author: "Jun Chen and Tory Norton"
+date: "`r Sys.Date()`"
+output: 
+    xaringan::moon_reader:
+    lib_dir: libs
+    # selfContained: true
+    nature:
+      ratio: "16:9"
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = F, 
+  message = F, warning = F,
+  fig.retina = 3,
+  fig.dim=c(10.5, 6.5),
+  fig.align = "center"
+  # out.width = "100%"
+  )
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(coda)
+library(bayesplot)
+library(RColorBrewer)
+library(patchwork)
+library(lme4)
+library(lattice)
+
+
+# theme_set(theme_bw())
+options(knitr.kable.NA = '')
+```
+
+```{r load-data}
+load("particleAdhesion.RData")
+adhesion_original <- x
+
+# remove constants and redundant cols
+adhesion_small <- adhesion_original %>%
+  select(-c(bins, removed, hamaker, density, workOfAdhesion))
+
+# move "original" counts to rows with RPM 0
+adhesion <- adhesion_small %>%
+  group_by(site, sample, avgDiameter, type) %>%
+  summarise(retained = unique(original), .groups = "drop") %>%
+  mutate(rotation = 0) %>%
+  rbind(select(adhesion_small, -original))
+
+adhesion_constants <- adhesion_original %>% 
+  group_by(type) %>% 
+  summarise(
+    density = unique(density),
+    hamaker = unique(hamaker),
+    workOfAdhesion = unique(workOfAdhesion)
+    )
+
+# calculate area for each sample/site
+adhesion_area <- adhesion %>%
+  # total diameter/area for each size
+  mutate(diam = avgDiameter * retained,
+         area = (avgDiameter) ^ 2 * pi / 4 * retained) %>%
+  group_by(site, sample, rotation, type) %>%
+  summarise(
+    # sum over sizes
+    total_diam = sum(diam),
+    total_area = sum(area),
+    retained = sum(retained),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # unique identifiers for each (type, sample) and (type, sample, site)
+    unique_id = paste0(type, sample, site),
+    samp_id = paste0(type, sample),
+    # calculate avg diam
+    avg_diam = case_when(retained == 0 ~ 0, TRUE ~ total_diam / retained),
+    total_area_cm = total_area/1e+4
+  ) %>% 
+  left_join(adhesion_constants)
+```
+
+
+
+## Background: The Soiling Problem
+
+- Dust particles adhere to solar panels, reducing energy efficiency (*"soiling"*)
+
+- To reduce soiling, we must understand the **adhesive properties** of dust particles
+
+- Dust composition varies by region
+
+- Understanding adhesion for different materials can:
+  - Help identify region-specific challenges
+  - Inform strategies for mitigation
+
+---
+
+## Experimental Design
+
+- **Materials:** alfalfa, fly ash, solosphere, silicon dioxide, graphite, gypsum
+
+- Five glass slides were soiled with each material
+
+- Each slide was imaged at four sites; particles were binned according to size and counted
+
+- Slides were centrifuged at:
+  - 1000, 3000, 5000, 7000, and 10000 rpm
+  
+- After each round of centrifuging, slides were re-imaged at the same four sites
+
+---
+
+## Response: Particle area
+
+```{r, fig.dim=c(10,5)}
+point_alpha <- 0.7
+rpm <- adhesion_area$rotation %>% 
+  unique()
+value_labeller <- c(
+  "avg_diam" = "'Avg. diameter ('*mu*'m)'",
+  "retained" = "'Count'",
+  "total_area_cm" = "'Total area (cm'^2*')'"
+    )
+ # facet_grid(
+  #   rows = vars(name),
+  #   cols = vars(type),
+  #   labeller = labeller(
+  #     .cols = as_labeller(value_labeller, default = label_parsed)),
+  #   scales = "free_y",
+  #   ) +
+
+plot_types <- c("alfalfa", "gypsum")
+
+p1 <- adhesion_area %>% 
+  filter(type == plot_types[1]) %>% 
+  mutate(avg_diam = case_match(avg_diam, 0 ~ NA, .default = avg_diam)) %>% 
+  pivot_longer(cols = c("retained", "avg_diam", "total_area_cm")) %>% 
+  mutate(name = fct_relevel(name, "retained")) %>% 
+  ggplot(aes(x = rotation, y = value, color = as.factor(sample))) +
+  geom_smooth(se = F, linewidth = 0.7) +
+  geom_jitter(alpha = point_alpha) +
+  facet_wrap(~name, 
+             labeller = as_labeller(value_labeller, default = label_parsed),
+             ncol = 1,
+             scales = "free_y"
+             ) +
+  scale_color_brewer(type = "qual", palette = 3) +
+  labs(
+    # title = "SiO2: Particle count, average diameter, and coverage area", 
+    title = plot_types[1],
+       color = "Sample",
+       y = "",
+       x = "RPM (thousands)") +
+  theme_classic() +
+  theme(
+    legend.position = "none"
+    # panel.grid.major = element_line()
+    ) +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) 
+
+p2 <- adhesion_area %>% 
+  filter(type == plot_types[2]) %>% 
+  mutate(avg_diam = case_match(avg_diam, 0 ~ NA, .default = avg_diam)) %>% 
+  pivot_longer(cols = c("retained", "avg_diam", "total_area_cm")) %>% 
+  mutate(name = fct_relevel(name, "retained")) %>% 
+  ggplot(aes(x = rotation, y = value, color = as.factor(sample))) +
+  geom_smooth(se = F, linewidth = 0.7) +
+  geom_jitter(alpha = point_alpha) +
+  facet_wrap(~name, 
+             labeller = as_labeller(value_labeller, default = label_parsed),
+             ncol = 1,
+             scales = "free_y"
+             ) +
+  scale_color_brewer(type = "qual", palette = 3) +
+  labs(
+    title = plot_types[2],
+       color = "Sample",
+       y = "",
+       x = "RPM (thousands)") +
+  theme_classic() +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) 
+  # theme(
+  #   # legend.position = "none",
+  #   panel.grid.major = element_line())
+
+(p1 | p2)
+```
+
+- **Soiling metric:** Soiling reduces panel output by obscuring surface area, so we use total particle area as a natural metric. 
+
+- Area captures both particle breakup (e.g., gypsum: shrinking diameters) and particle removal (e.g., alfalfa: declining counts).
+
+---
+
+## Data Cleaning
+
+```{r, fig.dim=c(10,4)}
+outlier_ids <- tribble(
+  ~unique_id, ~rotation,
+  "flyash34", 0,
+  "LQ51", 0,
+  "graphite13", 0,
+  "graphite13", 10000
+)
+
+adhesion_outliers <- adhesion_area %>%
+  semi_join(outlier_ids)
+
+adhesion_clean <- adhesion_area %>%
+  anti_join(outlier_ids)
+
+adhesion_clean %>%
+  mutate(outlier = FALSE) %>% 
+  rbind(mutate(adhesion_outliers, outlier = TRUE)) %>% 
+  filter(type %in% adhesion_outliers$type) %>% 
+  mutate(unique_id_rpm = paste0(unique_id,"_", rpm)) %>% 
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6, linetype = "solid") +
+  geom_jitter(alpha = 1) +
+  facet_wrap(~ type, scales = "free", nrow = 1) +
+  scale_x_continuous(breaks = rpm, labels = rpm / 1000) +
+  theme_classic() +
+  scale_color_brewer(type = "qual", palette = 3) +
+  ggforce::geom_mark_circle(
+    mapping = aes(group = unique_id_rpm, filter = outlier),
+    color = "red",
+  ) +
+  scale_y_continuous(expand = expansion(mult = 0.1)) +
+  theme(
+    # legend.position = c(0.95, 0),
+    # legend.justification = c(1, 0),
+    # legend.background = element_rect(color = "black"),
+    # legend.margin = margin(10, 10, 5, 10, "pt"),
+    panel.grid.major  = element_line()
+  )+
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm" ^ 2 * ")"),
+    title = "Outliers"
+  ) 
+
+```
+
+- **Outlier removal:** Four data points (from three sites) were removed due to clearly erroneous values (e.g., all pre-centrifuge particle counts lower than counts after 10000 rpm).
+
+- **Scope of removal:** These sites show reasonable behavior at other rotation speeds, so only the affected speeds were removed.
+
+
+---
+
+## Physical Properties
+
+```{r}
+adhesion_constants %>% 
+  mutate(hamaker = as.character(signif(hamaker, 3))) %>% 
+  relocate(hamaker, .after = last_col()) %>% 
+  arrange(desc(density)) %>% 
+  kable(align = c("lrrr"),
+        col.names = c("Material", "Density", "Work of Adhesion", "Hamaker"))
+```
+
+- **Motivation:** We examine how material physical properties (e.g., density, work of adhesion) influence soiling behavior, both to explain observed trends and to guide interpretation for untested materials.
+- **Variable selection:** Because work of adhesion and Hamaker constant are collinear, we exclude the Hamaker constant from the analysis.
+- **Effect type:** Exploratory analysis suggested an intercept based on work of adhesion and an interaction term for density and rotation speed.
+
+---
+
+## Correlated Data
+
+```{r, fig.dim = c(10, 4)}
+adhesion_clean %>%
+  filter(type != "solosphere") %>% 
+  # remove outlier for plotting
+  # filter(type != "flyash" | sample != 3 | rotation != 0 | site != 4) %>%
+  ggplot(aes(
+    x = rotation,
+    y = total_area_cm,
+    color = as.factor(sample)
+  )) +
+  geom_smooth(se = F, linewidth = 0.6) +
+  geom_jitter() +
+  facet_wrap( ~ type, scales = "free_y") +
+  scale_x_continuous(
+    breaks = rpm, 
+    labels = rpm/1000
+  ) +
+  theme_classic() +
+  labs(
+    color = "Sample",
+    x = "RPM (thousands)",
+    y = expression("Area (cm"^2*")"),
+    title = "Particle coverage area after each round of centrifuging"
+    ) +
+  theme(legend.position = "right") +
+  scale_color_brewer(type = "qual", palette = 3) 
+```
+
+- **Motivation:** Measurements come from sites nested within samples, with repeated measurements taken at the same site. Data from the same site/sample are likely correlated.
+
+- Visual inspection shows that measurements from the same slide tend to cluster at each rotation speed. This suggests that within-sample correlation is significant.
+
+---
+
+
+## Frequentist Modeling - Model Specification
+
+We fit a **linear mixed-effects** model (on centered and scaled area):
+
+
+\begin{align}
+\small
+\mathrm{total\_area} = \underbrace{\beta_1\text{work}_\text{type} + \mu_{\text{type}} + \mu_{\text{samp}} }_\text{intercept} + \underbrace{\{\beta_2 +  \gamma_\text{type}\} \, \text{rpm} + \beta_3\, \{\text{rpm} \times \text{density}_\text{type}\} }_\text{slope}  + \epsilon
+\end{align}
+
+
+- **Fixed effects** capture:
+  - Baseline slope 
+  - Effects of physical constants
+  
+- **Random slope:** Allows rate of change to vary by particle type.
+
+- **Random intercept:** Accounts for correlation among measurements from the same slide.
+  - A site-within-sample level intercept was considered, but model fit was similar to sample-level intercept. We concluded that sample-level effect may be sufficient to account for correlation.
+
+---
+
+## Frequentist Modeling - Goodness-of-Fit
+
+```{r, fig.dim=c(10, 5)}
+adhesion_scaled <- adhesion_clean %>% 
+  mutate(across(where(is.numeric) & !c(site, sample), scale))
+
+mod_type_samp <- lmer(
+  total_area_cm ~ + -1 + (1|samp_id) + (rotation|type) + workOfAdhesion + rotation + density*rotation,
+  data = adhesion_scaled
+  )
+
+mod2 <- lmer(
+  total_area ~ (1|samp_id) + (rotation|type) + workOfAdhesion + rotation + density*rotation,
+  data = adhesion_scaled
+  )
+
+df_fit <- adhesion_scaled %>% 
+  mutate(
+  fitted = fitted(mod_type_samp),
+  resid = resid(mod_type_samp)
+  )
+df_fit2 <- adhesion_scaled %>%
+  mutate(
+  fitted = fitted(mod2),
+  resid = resid(mod2)
+  )
+
+p_qq <- ggplot(df_fit, aes(sample = resid)) +
+  stat_qq(alpha = 0.5) +
+  stat_qq_line() +
+  facet_wrap(~ type, scales = "free") +
+  labs(title = "Q–Q plots of residuals by particle type") +
+  theme_bw() +
+  theme(axis.title = element_blank())
+p_qq2 <- ggplot(df_fit, aes(sample = resid)) +
+  stat_qq(alpha = 0.5) +
+  stat_qq_line() +
+  facet_wrap(~ type, scales = "free") +
+  labs(title = "Q–Q plots of residuals by particle type") +
+  theme_bw() +
+  theme(axis.title = element_blank())
+
+
+re <- ranef(mod_type_samp, condVar = TRUE)
+re2 <- ranef(mod2, condVar = TRUE)
+# vc <- attr(re$samp_id, "postVar")[1, 1, ]
+
+re_samp <- as.data.frame(re$samp_id) %>% 
+  rownames_to_column(var = "samp_id") %>% 
+  mutate(
+    # samp_id = rownames(re_samp),
+    vc = attr(re$samp_id, "postVar")[1, 1, ],
+    se = sqrt(vc),
+    lower = `(Intercept)` - 1.96 * se,
+    upper = `(Intercept)` + 1.96 * se
+    )
+re_samp2 <- as.data.frame(re2$samp_id) %>% 
+  rownames_to_column(var = "samp_id") %>%
+  mutate(
+    # samp_id = rownames(re_samp),
+    vc = attr(re2$samp_id, "postVar")[1, 1, ],
+    se = sqrt(vc),
+    lower = `(Intercept)` - 1.96 * se,
+    upper = `(Intercept)` + 1.96 * se
+    )
+
+
+p_ranef <- re_samp %>% 
+  mutate(type = str_remove(samp_id, pattern = regex("\\d"))) %>% 
+  ggplot(aes(
+  x = reorder(samp_id, `(Intercept)`), 
+  y = `(Intercept)`),
+  color = type,
+  fill = type
+  ) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(
+    x = "Sample ID",
+    y = "Random intercept (sample)",
+    title = "Random intercepts with 95% CI"
+  ) +
+  theme_bw()
+p_ranef2 <- ggplot(re_samp2, aes(x = reorder(samp_id, `(Intercept)`), y = `(Intercept)`)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(
+    x = "Sample ID",
+    y = "Random intercept (sample)",
+    title = "Random intercepts with 95% CI"
+  ) +
+  theme_bw()
+
+# (p_qq | p_ranef)
+
+ggsave(plot = p_qq, filename = "figs/fig_qq.png", width = 5, height = 4.5)
+ggsave(plot = p_ranef, filename = "figs/fig_ranef.png", width = 5, height = 4.5)
+# (p_qq2 | p_ranef2)
+```
+
+
+.pull-left[
+<img src="figs/fig_qq.png" width="100%" />
+
+Residuals are approximately normally distributed within each particle type, with mild deviations in the tails.
+]
+
+
+.pull-right[
+<img src="figs/fig_ranef.png" width="100%" />
+
+Random intercepts by sample are relatively large, indicating that within-type variation is significant. 
+]
+
+
+
+---
+
+
+
+## Frequentist Models - Results
+
+```{r, fig.dim=c(9, 5)}
+# coef(mod_type_samp)$type
+# summary(mod_type_samp)
+library(broom.mixed)
+
+fe <- tidy(
+  mod_type_samp,
+  effects = "fixed",
+  conf.int = TRUE,
+  conf.level = 0.95
+)
+
+p_fixef <- ggplot(fe, aes(x = reorder(term, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(
+    aes(ymin = conf.low, ymax = conf.high),
+    width = 0.2
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  coord_flip() +
+  labs(
+    x = "",
+    y = "Fixed effect estimate",
+    title = "Fixed effects with 95% confidence intervals"
+  ) +
+  theme_bw()
+
+# ggsave(plot = p_fixef, filename = "figs/fixed_effects.png")
+p_fixef
+```
+
+- The 95% CIs for the effects of density and work of adhesion overlap zero, indicating that, after accounting for variability captured by the random effects, the data provide limited evidence that their population-average effects on adhesive behavior differ from zero.
+
+
