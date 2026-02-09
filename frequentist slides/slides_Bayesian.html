@@ -24,120 +24,7 @@ class: center, middle, inverse, title-slide
 
 
 
-## Frequentist Models - Data Preprocessing
 
-- Outcome Definition:
-
-Outcome: total retained surface area per (type, sample, site, rotation).
-
-$$
-`\begin{align}
-\mathrm{total\_area}
-=
-\sum_{\mathrm{bins}}\left(\frac{\pi}{4} d^2\right)\cdot \mathrm{retained}_{\mathrm{bin}} 
-\end{align}`
-$$
-
-
-This aggregates bin-level retention into a single attachment proxy, reflecting the total effective surface area that remains attached after spinning under each rotation speed.
-
-- Baseline Handling (rotation = 0)
-
-At rotation = 0, retained area equals original deposited area and is treated as baseline
-
-- Log transform &amp; zero handling
-
-**Challenges:**  total area includes exact zeros, so log-transform is undefined
-
-**Strategy:** We add small constant c to allow log(total area), which means we use log(total_area + c) when the total area is 0.
-
-**Choice of c:** `\(c=0.1×\)`min(non-zero total area)
-
----
-
-## Frequentist Models - Model Specification
-
-We fit a mixed-effects model:
-
-$$
-`\begin{align}
-\log(\mathrm{total\_area})
-=
-\beta_0 + \beta_1z(\mathrm{rotation}) + b_{1, \mathrm{type}}z(\mathrm{rotation}) + \alpha_{\mathrm{type:sample:site}} + \epsilon
-\end{align}`
-$$
-Random effects are nested within particle type and sample–site combinations.
-
-**Components**:
-- Fixed effect `\(\beta_1\)`: overall rotation effect
-- Random slope `\(b_{1, \mathrm{type}}\)`: particle type-specific sensitivity to rotation
-- Random intercept `\(\alpha_{\mathrm{type:sample:site}}\)`: baseline differences within each (type, sample, site). This accounts for repeated measurements within the same experimental unit.
-- Standardize rotation `\(z(.)\)` for numerical fitting stability
-- The original total area are fitted with *rotation = 0*.
-- Size-bin (diameter) effects are implicitly aggregated into total area and not modeled separately at this stage
-
----
-
-## Frequentist Models - Fitting Results
-
-.pull-left[
-**Fixed Effect Result:**
-
-| Term              | Estimate | Std. Error | t value |
-|-------------------|----------|------------|---------|
-| (Intercept)       | 8.2717   | 0.1231     | 67.17   |
-| scale(rotation)   | -0.7957  | 0.1860     | -4.28   |
-
-**Interpretation:** `\(\beta_1&lt;0\)` implies retained area decreases with rotation. A one–SD increase in rotation is associated with an average ~55% decrease in retained area (`\(e^{-0.79}\)` ~ `\(0.45\)`)
-]
-
-.pull-right[
-**Type heterogeneity (random slopes):**
-
-| Particle type | b₁,type | β₁ (fixed) | β₁ + b₁,type |
-|---------------|---------|------------|--------------|
-| alfalfa       | -0.3546 | -0.7957    | -1.1503     |
-| flyash        |  0.5988 | -0.7957    | -0.1969     |
-| graphite      |  0.4612 | -0.7957    | -0.3345     |
-| gypsum        |  0.0072 | -0.7957    | -0.7885     |
-| LQ            | -0.4932 | -0.7957    | -1.2889     |
-| SiO2          | -0.5466 | -0.7957    | -1.3423     |
-| solosphere    |  0.3273 | -0.7957    | -0.4684     |
-
-**Interpretation:**  
-More negative values indicate stronger decrease in retained area with increasing rotation. Particle types differ substantially in their sensitivity to rotation, ranging from weak (flyash) to strong (SiO₂, LQ) decreases.
-]
-
----
-
-## Frequentist Models - Model Check
-.pull-left[
-&lt;img src="figs/resid_vs_fitted.png" width="100%" /&gt;
-
-Residulas are mostly centered around zero with no strong nonlinear trend, suggesting that hte linear mean structure and variance assumptions are broadly reasonable. But there is a small set of extreme negative residuals corresponds to near-zero total retained area after log-transformation.
-]
-
-.pull-right[
-&lt;img src="figs/qqplot.png" width="100%" /&gt;
-
-Residuals follow the normal reference line well in the central region, with moderate deviations in the tails. Given the large sample size, these deviations are unlikely to materially affect inference on fixed effects.
-]
-
-
----
-## Conclusions:
-
-**What this model captures:** The model accounts for experimental design via random intercepts, and identifies type-to-type variation in rotation response via random slope
-
-**Main Findings:** Rotation is associated with a strong decrease in total retained area. There exists substantial heterogeneity across particle types in this sensitivity
-
-**Limitation:** Size-bin (diameter) information and physical properties are not explicitly modeled. Aggregation to total area may mask size-selective attachment mechanisms operating at the bin level.
-
-**Potential next steps:** Explicitly incorporate particle diameter and measured physical properties (e.g. density, surface characteristics) into our modeling.
-
-
-
----
 ## Bayesian Hierarchical Model 
 
 **Motivation:**
@@ -167,6 +54,7 @@ Here,
 
 ## Prior Specification &amp; MCMC Initializations
 
+.pull-left[
 *Prior Assumptions*
 
 $$
@@ -181,8 +69,9 @@ $$
 $$
 
 
-- The half-t distributions provides weak-informative and heavy-tailed for data-driven purpose. 
+- The half-t distributions provides weak-informative and heavy-tailed for data-driven purpose.]
 
+.pull-right[
 *Initializations:*
 
 $$
@@ -196,6 +85,7 @@ $$
 
 
 - We use over-dispersed but reasonable initial values for all parameter in our 4 MCMC chains for a better MCMC convergence diagnostics. 
+]
 
 ---
 
@@ -266,10 +156,27 @@ $$
 Work of adhesion shows a robust positive effect, rotation tends to reduce retained area at the average level, but the magnitude and significance of this reduction varies substantially by particle type, while the rotation–density interaction appears weak.
 ]
 
-
---- 
+---
 
 ## Conclusions
+
+**Key inference**
+
+- Work of adhesion has a **clear positive association** with retained area.
+- Rotation **reduces retained area on average**, but the magnitude and significance of this effect **varies substantially by particle type**.
+- The rotation–density interaction is **weak**, with posterior mass centered near zero.
+
+**Limitations**
+
+- Density effects are inferred indirectly through an interaction term and may be underestimated.
+- The model focuses on linear effects and does not capture potential nonlinearities.
+- Required number of sampling is large, leading to large computational cost.
+
+**Future work**
+
+- Explore more **nonlinear effects** of predictors.
+- Allow different structured prior assumptions informed by material properties.
+- Improving the computational efficiency.
 
 
 
